@@ -1,596 +1,647 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect } from "react"
-import Image from "next/image"
-import Link from "next/link"
-import { 
-  Eye, 
-  EyeOff, 
-  User, 
-  Lock, 
-  ArrowLeft, 
-  Loader2, 
-  Building2, 
-  AlertCircle,
-  FileText,
-  Download,
-  Calendar,
-  DollarSign,
-  MessageCircle,
-  LogOut,
-  Home
-} from "lucide-react"
-import { supabase } from "@/lib/supabase"
-import { useSearchParams, useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { useEffect, useState, FormEvent } from "react"
+import { useRouter } from "next/navigation"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  User, MessageCircle, Wrench, Building2, LogOut, Settings, Award, Calendar, MapPin, Phone, Mail, TrendingUp, Plus, X, AlertCircle,
+  Pencil,
+} from "lucide-react"
+import { useAuth } from "@/contexts/AuthContext"
+import { supabase } from "@/lib/supabase"
+import Chat from "@/components/Chat"
+import { useToast } from "@/hooks/use-toast"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import Image from "next/image"
 
-type UserProfile = {
-  id: string
-  nome: string
-  telefone: string
-  endereco: string
-  cpf_cnpj: string
-  cidade: string
-  estado: string
-  data_nascimento?: string // apenas para cliente
-  cau?: string // apenas para arquiteto
-  especialidade?: string // apenas para arquiteto
+// Interfaces
+interface Obra {
+  id: string;
+  titulo: string;
+  cliente: string;
+  endereco: string;
+  status: string;
+  data_inicio: string;
+  arquiteto_nome?: string;
+  vendedor_nome: string;
+  valor_total?: number;
+  data_previsao?: string;
 }
 
-type Orcamento = {
-  id: string
-  numero_orcamento: string
-  cliente_id: string
-  arquiteto_id: string | null
-  vendedor: string | null
-  responsavel_obra: string | null
-  observacao: string | null
-  arquivos: any[]
-  created_at: string
-  updated_at: string
-  clientes: { nome: string } | null
-  arquitetos: { nome: string } | null
+interface SolicitacaoManutencao {
+  id: string;
+  tipo_servico: string;
+  descricao_problema: string;
+  status: string;
+  created_at: string;
+  urgencia: string;
 }
 
-export default function AcessoPage() {
-  const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  const [userType, setUserType] = useState<"cliente" | "arquiteto" | null>(null)
-  const [orcamentos, setOrcamentos] = useState<Orcamento[]>([])
-  const [loadingOrcamentos, setLoadingOrcamentos] = useState(false)
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  })
+interface ProfileData {
+  id: string;
+  uid: string;
+  nome: string;
+  email: string;
+  telefone?: string;
+  cidade?: string;
+  estado?: string;
+  desconto_atual?: number;
+}
 
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const message = searchParams.get("message")
+// Componente do Modal de Solicitação de Andamento
+function SolicitacaoModal({ isOpen, onClose, userProfile, userType }) {
+  if (!isOpen) return null
 
-  useEffect(() => {
-    checkUserSession()
-  }, [])
+  const [loading, setLoading] = useState(false)
+  const [nome, setNome] = useState(userProfile?.nome || "")
+  const [tipoUsuario, setTipoUsuario] = useState(userType)
+  const [numeroOrcamento, setNumeroOrcamento] = useState("")
 
-  useEffect(() => {
-    if (isLoggedIn && userProfile) {
-      fetchUserOrcamentos()
-    }
-  }, [isLoggedIn, userProfile])
+  const { toast } = useToast()
 
-  const checkUserSession = async () => {
-    try {
-      const { data: { user }, error } = await supabase.auth.getUser()
-      
-      if (error || !user) {
-        setIsLoggedIn(false)
-        return
-      }
+  const handleSolicitar = async (e: FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
 
-      // Verificar se é cliente
-      const { data: clienteData, error: clienteError } = await supabase
-        .from("clientes")
-        .select("*")
-        .eq("id", user.id)
-        .single()
+    if (!nome.trim() || !numeroOrcamento.trim()) {
+      toast({
+        title: "⚠️ Erro",
+        description: "Por favor, preencha todos os campos obrigatórios.",
+        variant: "destructive",
+      })
+      setLoading(false)
+      return
+    }
 
-      if (clienteData && !clienteError) {
-        setUserProfile(clienteData)
-        setUserType("cliente")
-        setIsLoggedIn(true)
-        router.push("/profile")
-        return
-      }
+    try {
+      const { data, error } = await supabase
+        .from("solicitacoes_andamento")
+        .insert({
+          nome,
+          tipo_usuario: tipoUsuario,
+          numero_orcamento: numeroOrcamento,
+          perfil_id: userProfile.id,
+        })
+        .select()
 
-      // Verificar se é arquiteto
-      const { data: arquitetoData, error: arquitetoError } = await supabase
-        .from("arquitetos")
-        .select("*")
-        .eq("id", user.id)
-        .single()
+      if (error) throw error
 
-      if (arquitetoData && !arquitetoError) {
-        setUserProfile(arquitetoData)
-        setUserType("arquiteto")
-        setIsLoggedIn(true)
-        router.push("/profile")
-        return
-      }
+      toast({
+        title: "✅ Sucesso",
+        description: "Sua solicitação foi enviada e está pendente de aprovação!",
+      })
+      onClose()
+      setNome(userProfile?.nome || "")
+      setTipoUsuario(userType)
+      setNumeroOrcamento("")
+    } catch (error: any) {
+      console.error("Erro ao solicitar andamento:", error)
+      toast({
+        title: "❌ Erro",
+        description: `Erro ao enviar solicitação: ${error.message}`,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
-      // Verificar se é um usuário da tabela 'profiles' (admin/vendedor)
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .single()
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <Card className="w-full max-w-lg bg-white text-[#0077B6] border-[#0077B6]/20">
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle className="flex items-center gap-2 text-[#0077B6]">
+              <Pencil className="w-5 h-5 text-[#0077B6]" />
+              Solicitar Andamento de Obra
+            </CardTitle>
+            <Button variant="ghost" size="icon" onClick={onClose} className="text-[#0077B6]/70 hover:text-[#0077B6] hover:bg-[#0077B6]/10">
+              <X className="w-5 h-5 text-[#0077B6]" />
+            </Button>
+          </div>
+          <CardDescription className="text-[#0077B6]">Preencha o formulário para solicitar o andamento de uma obra.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSolicitar} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="nome" className="text-[#0077B6]">
+                Nome
+              </Label>
+              <Input
+                id="nome"
+                name="nome"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                className="bg-blue-50 border-[#0077B6]/20 text-[#0077B6]"
+                placeholder="Nome Completo"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tipoUsuario" className="text-[#0077B6]">
+                Tipo de Usuário
+              </Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={tipoUsuario === "cliente" ? "default" : "outline"}
+                  onClick={() => setTipoUsuario("cliente")}
+                  className={`flex-1 ${tipoUsuario === "cliente" ? "bg-[#0077B6] text-white" : "bg-transparent border-[#0077B6]/20 text-[#0077B6] hover:bg-[#0077B6]/10"}`}
+                >
+                  <User size={16} className="mr-2 text-white" />
+                  Cliente
+                </Button>
+                <Button
+                  type="button"
+                  variant={tipoUsuario === "arquiteto" ? "default" : "outline"}
+                  onClick={() => setTipoUsuario("arquiteto")}
+                  className={`flex-1 ${tipoUsuario === "arquiteto" ? "bg-[#0077B6] text-white" : "bg-transparent border-[#0077B6]/20 text-[#0077B6] hover:bg-[#0077B6]/10"}`}
+                >
+                  <Building2 size={16} className="mr-2 text-white" />
+                  Arquiteto
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="numeroOrcamento" className="text-[#0077B6]">
+                Número do Orçamento
+              </Label>
+              <Input
+                id="numeroOrcamento"
+                name="numeroOrcamento"
+                value={numeroOrcamento}
+                onChange={(e) => setNumeroOrcamento(e.target.value)}
+                className="bg-blue-50 border-[#0077B6]/20 text-[#0077B6]"
+                placeholder="Número do Orçamento"
+                required
+              />
+            </div>
 
-      if (profileData && !profileError) {
-        // Se for admin/vendedor, redirecionar para o dashboard
-        router.push("/dashboard")
-        return
-      }
+            <div className="flex justify-end gap-3 pt-4">
+              <Button type="button" variant="outline" onClick={onClose} className="bg-transparent border-[#0077B6]/20 text-[#0077B6] hover:bg-[#0077B6]/10">
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading} className="bg-[#0077B6] hover:bg-[#0077B6]/90 text-white">
+                {loading ? "Solicitando..." : "SOLICITAR"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
 
-      // Se não encontrou em nenhuma tabela, fazer logout
-      await supabase.auth.signOut()
-      setIsLoggedIn(false)
-      router.push("/acesso?message=" + encodeURIComponent("Usuário não encontrado ou sem permissão de acesso."))
+// Componente do Modal de Configurações
+function SettingsModal({ isOpen, onClose, user, userType, profileData }) {
+  if (!isOpen) return null
 
-    } catch (error) {
-      console.error("Erro ao verificar sessão:", error)
-      setIsLoggedIn(false)
-    }
-  }
+  const [formData, setFormData] = useState({
+    nome: profileData?.nome || "",
+    telefone: profileData?.telefone || "",
+  })
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null)
 
-  const fetchUserOrcamentos = async () => {
-    if (!userProfile || !userType) return
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }))
+  }
 
-    setLoadingOrcamentos(true)
-    try {
-      let query = supabase
-        .from("orcamentos")
-        .select(`
-          id,
-          numero_orcamento,
-          cliente_id,
-          arquiteto_id,
-          vendedor,
-          responsavel_obra,
-          observacao,
-          arquivos,
-          created_at,
-          updated_at,
-          clientes(nome),
-          arquitetos(nome)
-        `)
-        .order("created_at", { ascending: false })
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!user || !userType || !profileData?.id) return
+    setLoading(true)
+    setMessage(null)
 
-      if (userType === "cliente") {
-        query = query.eq("cliente_id", userProfile.id)
-      } else if (userType === "arquiteto") {
-        query = query.eq("arquiteto_id", userProfile.id)
-      }
+    const table = userType === "cliente" ? "clientes" : "arquitetos"
+    const { error } = await supabase.from(table).update({ nome: formData.nome, telefone: formData.telefone }).eq("id", profileData.id)
 
-      const { data, error } = await query
+    setLoading(false)
+    if (error) {
+      setMessage({ type: "error", text: "Erro ao atualizar perfil. Tente novamente." })
+      console.error("Update error:", error)
+    } else {
+      setMessage({ type: "success", text: "Perfil atualizado com sucesso!" })
+      setTimeout(() => {
+        onClose()
+        window.location.reload()
+      }, 1500)
+    }
+  }
 
-      if (error) {
-        console.error("Erro ao buscar orçamentos:", error)
-      } else {
-        setOrcamentos(data as Orcamento[])
-      }
-    } catch (error) {
-      console.error("Erro geral ao buscar orçamentos:", error)
-    } finally {
-      setLoadingOrcamentos(false)
-    }
-  }
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <Card className="w-full max-w-lg bg-white text-[#0077B6] border-[#0077B6]/20">
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle className="flex items-center gap-2 text-[#0077B6]">
+              <Settings className="w-5 h-5 text-[#0077B6]" />
+              Configurações da Conta
+            </CardTitle>
+            <Button variant="ghost" size="icon" onClick={onClose} className="text-[#0077B6]/70 hover:text-[#0077B6] hover:bg-[#0077B6]/10">
+              <X className="w-5 h-5 text-[#0077B6]" />
+            </Button>
+          </div>
+          <CardDescription className="text-[#0077B6]">Atualize suas informações pessoais.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="nome" className="text-[#0077B6]">
+                Nome Completo
+              </Label>
+              <Input id="nome" name="nome" value={formData.nome} onChange={handleChange} className="bg-blue-50 border-blue-200 text-[#0077B6]" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-[#0077B6]">
+                Email (não pode ser alterado)
+              </Label>
+              <Input id="email" name="email" value={user?.email || ""} disabled className="bg-blue-100 border-blue-200 text-[#0077B6]" />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="telefone" className="text-[#0077B6]">
+                Telefone
+              </Label>
+              <Input id="telefone" name="telefone" value={formData.telefone} onChange={handleChange} className="bg-blue-50 border-blue-200 text-[#0077B6]" />
+            </div>
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
+            {message && (
+              <div className={`p-3 rounded-lg text-sm flex items-center gap-2 ${message.type === "success" ? "bg-green-500/20 text-[#0077B6]" : "bg-red-500/20 text-[#0077B6]"}`}>
+                <AlertCircle size={16} className="text-[#0077B6]" /> {message.text}
+              </div>
+            )}
 
-    try {
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: formData.email,
-        password: formData.password,
-      })
+            <div className="flex justify-end gap-3 pt-4">
+              <Button type="button" variant="outline" onClick={onClose} className="bg-transparent border-[#0077B6]/20 text-[#0077B6] hover:bg-[#0077B6]/10">
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading} className="bg-[#0077B6] hover:bg-[#0077B6]/90 text-white">
+                {loading ? "Salvando..." : "Salvar Alterações"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
 
-      if (authError) {
-        throw authError
-      }
+export default function ProfilePage() {
+  const { user, signOut } = useAuth()
+  const router = useRouter()
+  const { toast } = useToast()
 
-      if (!authData.user) {
-        throw new Error("Erro ao fazer login.")
-      }
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [userType, setUserType] = useState<"cliente" | "arquiteto" | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-      // Verificar se é cliente
-      const { data: clienteData, error: clienteError } = await supabase
-        .from("clientes")
-        .select("*")
-        .eq("id", authData.user.id)
-        .single()
+  const [obras, setObras] = useState<Obra[]>([])
+  const [loadingObras, setLoadingObras] = useState(true)
+  const [solicitacoes, setSolicitacoes] = useState<SolicitacaoManutencao[]>([])
+  const [loadingSolicitacoes, setLoadingSolicitacoes] = useState(true)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [solicitacaoAndamentoOpen, setSolicitacaoAndamentoOpen] = useState(false)
 
-      if (clienteData && !clienteError) {
-        setUserProfile(clienteData)
-        setUserType("cliente")
-        setIsLoggedIn(true)
-        router.push("/profile")
-        return
-      }
+  const fetchObras = async (profileId: string, type: "cliente" | "arquiteto") => {
+    setLoadingObras(true)
+    try {
+      const column = type === "cliente" ? "cliente_id" : "arquiteto_id"
+      const { data, error } = await supabase.from("obras").select("*").eq(column, profileId).order("created_at", { ascending: false })
 
-      // Verificar se é arquiteto
-      const { data: arquitetoData, error: arquitetoError } = await supabase
-        .from("arquitetos")
-        .select("*")
-        .eq("id", authData.user.id)
-        .single()
+      if (error) throw error
+      setObras(data || [])
+    } catch (error) {
+      console.error("Erro ao buscar obras:", error)
+    } finally {
+      setLoadingObras(false)
+    }
+  }
 
-      if (arquitetoData && !arquitetoError) {
-        setUserProfile(arquitetoData)
-        setUserType("arquiteto")
-        setIsLoggedIn(true)
-        router.push("/profile")
-        return
-      }
+  const fetchSolicitacoes = async (clienteId: string) => {
+    setLoadingSolicitacoes(true)
+    try {
+      const { data, error } = await supabase.from("solicitacoes_manutencao").select("*").eq("cliente_id", clienteId).order("created_at", { ascending: false })
+      if (error) throw error
+      setSolicitacoes(data || [])
+    } catch (error) {
+      console.error("Erro ao buscar solicitações:", error)
+    } finally {
+      setLoadingSolicitacoes(false)
+    }
+  }
 
-      // Se não encontrou em nenhuma tabela
-      await supabase.auth.signOut()
-      throw new Error("Usuário não encontrado como cliente ou arquiteto.")
+  useEffect(() => {
+    const fetchData = async () => {
+      setIsLoading(true);
 
-    } catch (error: any) {
-      console.error("Login error:", error)
-      router.push(`/acesso?message=${encodeURIComponent(error.message || "Erro ao fazer login")}`)
-    } finally {
-      setIsLoading(false)
-    }
-  }
+      const { data: { user } } = await supabase.auth.getUser();
 
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut()
-      setIsLoggedIn(false)
-      setUserProfile(null)
-      setUserType(null)
-      setOrcamentos([])
-      setFormData({ email: "", password: "" })
-    } catch (error) {
-      console.error("Erro ao fazer logout:", error)
-    }
-  }
+      if (!user) {
+        router.push("/acesso");
+        return;
+      }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    })
-  }
+      let profile = null;
+      let type: "cliente" | "arquiteto" | null = null;
 
-  const handleDownloadFile = (arquivo: any) => {
-    if (arquivo.url) {
-      window.open(arquivo.url, "_blank")
-    }
-  }
+      try {
+        const { data: clienteProfile } = await supabase.from('clientes').select('*').eq('id', user.id).single();
+        if (clienteProfile) {
+          profile = clienteProfile;
+          type = 'cliente';
+          await fetchObras(clienteProfile.id, 'cliente');
+          await fetchSolicitacoes(clienteProfile.id);
+        } else {
+          const { data: arquitetoProfile } = await supabase.from('arquitetos').select('*').eq('id', user.id).single();
+          if (arquitetoProfile) {
+            profile = arquitetoProfile;
+            type = 'arquiteto';
+            await fetchObras(arquitetoProfile.id, 'arquiteto');
+            setLoadingSolicitacoes(false);
+          }
+        }
+      } catch (error) {
+        console.error("Erro ao buscar perfil:", error);
+      } finally {
+        setProfileData(profile);
+        setUserType(type);
+        setIsLoading(false);
+      }
+    };
 
-  if (isLoggedIn && userProfile) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-[var(--primary-blue-dark)]/90 via-[var(--primary-blue-medium)]/85 to-[var(--primary-blue-light)]/80 p-4">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="glass-effect rounded-2xl p-6 mb-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 relative">
-                  <Image src="/LOGO.png" alt="Design Vidraçaria" fill className="object-contain" />
-                </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-white">
-                    Painel do {userType === "cliente" ? "Cliente" : "Arquiteto"}
-                  </h1>
-                  <p className="text-white/80">Bem-vindo, {userProfile.nome}</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Link href="/">
-                  <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
-                    <Home size={16} className="mr-2" />
-                    Início
-                  </Button>
-                </Link>
-                <Button 
-                  onClick={handleLogout}
-                  variant="outline" 
-                  className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-                >
-                  <LogOut size={16} className="mr-2" />
-                  Sair
-                </Button>
-              </div>
-            </div>
-          </div>
+    fetchData();
 
-          {/* Informações do usuário */}
-          <div className="glass-effect rounded-2xl p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4">Suas Informações</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div>
-                <span className="text-white/60">Nome:</span>
-                <p className="text-white font-medium">{userProfile.nome}</p>
-              </div>
-              <div>
-                <span className="text-white/60">Telefone:</span>
-                <p className="text-white font-medium">{userProfile.telefone || "Não informado"}</p>
-              </div>
-              <div>
-                <span className="text-white/60">Cidade:</span>
-                <p className="text-white font-medium">{userProfile.cidade || "Não informado"}</p>
-              </div>
-              <div>
-                <span className="text-white/60">Estado:</span>
-                <p className="text-white font-medium">{userProfile.estado || "Não informado"}</p>
-              </div>
-              <div>
-                <span className="text-white/60">CPF/CNPJ:</span>
-                <p className="text-white font-medium">{userProfile.cpf_cnpj || "Não informado"}</p>
-              </div>
-              {userType === "cliente" && userProfile.data_nascimento && (
-                <div>
-                  <span className="text-white/60">Data de Nascimento:</span>
-                  <p className="text-white font-medium">
-                    {new Date(userProfile.data_nascimento).toLocaleDateString("pt-BR")}
-                  </p>
-                </div>
-              )}
-              {userType === "arquiteto" && userProfile.cau && (
-                <div>
-                  <span className="text-white/60">CAU:</span>
-                  <p className="text-white font-medium">{userProfile.cau}</p>
-                </div>
-              )}
-              {userType === "arquiteto" && userProfile.especialidade && (
-                <div>
-                  <span className="text-white/60">Especialidade:</span>
-                  <p className="text-white font-medium">{userProfile.especialidade}</p>
-                </div>
-              )}
-            </div>
-          </div>
+  }, [router]);
 
-          {/* Orçamentos */}
-          <div className="glass-effect rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-white">
-                {userType === "cliente" ? "Seus Orçamentos" : "Orçamentos Vinculados"}
-              </h2>
-              <Badge variant="secondary" className="bg-[var(--secondary-blue)] text-white">
-                {orcamentos.length} orçamento{orcamentos.length !== 1 ? "s" : ""}
-              </Badge>
-            </div>
 
-            {loadingOrcamentos ? (
-              <div className="flex justify-center items-center py-12">
-                <Loader2 className="animate-spin text-white" size={32} />
-                <span className="ml-2 text-white">Carregando orçamentos...</span>
-              </div>
-            ) : orcamentos.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {orcamentos.map((orcamento) => (
-                  <Card key={orcamento.id} className="glass-effect border-white/20 p-4">
-                    <CardHeader className="p-0 mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <CardTitle className="text-lg font-bold text-white">
-                          <div className="flex items-center gap-2">
-                            <FileText size={18} className="text-[var(--secondary-blue)]" />
-                            <span className="text-sm">{orcamento.numero_orcamento}</span>
-                          </div>
-                        </CardTitle>
-                        <Badge variant="secondary" className="bg-[var(--secondary-blue)] text-white text-xs">
-                          {new Date(orcamento.created_at).toLocaleDateString("pt-BR")}
-                        </Badge>
-                      </div>
+  const handleSignOut = async () => {
+    await signOut()
+    router.push("/")
+  }
 
-                      <div className="space-y-2 text-sm">
-                        {userType === "arquiteto" && (
-                          <div className="flex items-center gap-2 text-white/80">
-                            <User size={14} />
-                            <span>Cliente: {orcamento.clientes?.nome || "Não informado"}</span>
-                          </div>
-                        )}
-                        
-                        {userType === "cliente" && orcamento.arquitetos && (
-                          <div className="flex items-center gap-2 text-white/80">
-                            <Building2 size={14} />
-                            <span>Arquiteto: {orcamento.arquitetos.nome}</span>
-                          </div>
-                        )}
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "em_andamento": return "bg-[#0077B6]";
+      case "concluido": return "bg-[#0077B6]";
+      case "pendente": return "bg-[#0077B6]";
+      case "cancelado": return "bg-[#0077B6]";
+      default: return "bg-[#0077B6]";
+    }
+  }
 
-                        {orcamento.vendedor && (
-                          <div className="flex items-center gap-2 text-white/80">
-                            <DollarSign size={14} />
-                            <span>Vendedor: {orcamento.vendedor}</span>
-                          </div>
-                        )}
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case "em_andamento": return "Em Andamento";
+      case "concluido": return "Concluído";
+      case "pendente": return "Pendente";
+      case "cancelado": return "Cancelado";
+      default: return status;
+    }
+  }
 
-                        {orcamento.responsavel_obra && (
-                          <div className="flex items-center gap-2 text-white/80">
-                            <User size={14} />
-                            <span>Responsável: {orcamento.responsavel_obra}</span>
-                          </div>
-                        )}
-                      </div>
-                    </CardHeader>
+  const calculateDiscountProgress = () => {
+    if (userType !== 'arquiteto') return 0
+    const maxDiscount = 20
+    const discountPerProject = 1.2
+    const currentDiscount = Math.min(obras.length * discountPerProject, maxDiscount)
+    return (currentDiscount / maxDiscount) * 100
+  }
 
-                    <CardContent className="p-0">
-                      {orcamento.observacao && (
-                        <div className="mb-4">
-                          <h4 className="text-white font-semibold mb-2 text-sm">Observação</h4>
-                          <p className="text-white/70 text-xs bg-white/5 p-2 rounded">
-                            {orcamento.observacao}
-                          </p>
-                        </div>
-                      )}
+  const getManutencaoStatusColor = (status: string) => {
+    switch (status) {
+      case "pendente": return "bg-[#0077B6]";
+      case "em_andamento": return "bg-[#0077B6]";
+      case "concluido": return "bg-[#0077B6]";
+      default: return "bg-[#0077B6]";
+    }
+  }
 
-                      {orcamento.arquivos && orcamento.arquivos.length > 0 && (
-                        <div>
-                          <h4 className="text-white font-semibold mb-2 text-sm">
-                            Arquivos ({orcamento.arquivos.length})
-                          </h4>
-                          <div className="space-y-2 max-h-32 overflow-y-auto">
-                            {orcamento.arquivos.map((arquivo, index) => (
-                              <div key={index} className="flex items-center justify-between bg-white/10 p-2 rounded-md">
-                                <div className="flex items-center gap-2 text-white text-xs truncate">
-                                  <FileText size={12} />
-                                  <span className="truncate">{arquivo.nome_original || `Arquivo ${index + 1}`}</span>
-                                </div>
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleDownloadFile(arquivo)}
-                                  className="bg-[var(--primary-blue)] hover:bg-[var(--secondary-blue)] text-white ml-2 h-6 px-2"
-                                >
-                                  <Download size={10} />
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-12">
-                <MessageCircle className="mx-auto mb-4 text-white/40" size={40} />
-                <h3 className="text-lg font-medium text-white mb-2">
-                  {userType === "cliente" ? "Nenhum orçamento encontrado" : "Nenhum orçamento vinculado"}
-                </h3>
-                <p className="text-white/60">
-                  {userType === "cliente" 
-                    ? "Você ainda não possui orçamentos registrados." 
-                    : "Você ainda não foi vinculado a nenhum orçamento."
-                  }
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const getUrgenciaColor = (urgencia: string) => {
+    switch (urgencia.toLowerCase()) {
+      case "baixa": return "bg-[#0077B6]/20 text-[#0077B6]";
+      case "media": return "bg-[#0077B6]/20 text-[#0077B6]";
+      case "alta": return "bg-[#0077B6]/20 text-[#0077B6]";
+      default: return "bg-[#0077B6]/20 text-[#0077B6]";
+    }
+  }
 
-  return (
-    <div className="min-h-screen flex flex-col justify-center items-center p-4 relative bg-gradient-to-br from-[var(--primary-blue-dark)]/90 via-[var(--primary-blue-medium)]/85 to-[var(--primary-blue-light)]/80">
-      {/* Back Button */}
-      <div className="absolute top-4 left-4 z-20">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-white/80 hover:text-white transition-colors duration-300"
-        >
-          <ArrowLeft size={20} />
-          <span className="hidden sm:inline">Voltar ao Início</span>
-          <span className="sm:hidden">Voltar</span>
-        </Link>
-      </div>
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#0077B6] via-[#005F9A] to-[#00477D] flex flex-col items-center justify-center text-white">
+        <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-white" />
+        <p className="mt-4 text-white">Carregando perfil...</p>
+      </div>
+    )
+  }
 
-      {/* Login Card */}
-      <div className="w-full max-w-md relative z-10">
-        <div className="glass-effect rounded-2xl p-6 sm:p-8 shadow-2xl sm:px-8 sm:py-8">
-          {/* Logo */}
-          <div className="text-center mb-6 sm:mb-8">
-            <div className="w-20 h-20 mx-auto mb-3 relative sm:mb-0 py-0 text-lg sm:h-40 sm:w-60">
-              <Image src="/LOGO.png" alt="Design Vidraçaria" fill className="object-contain" />
-            </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white mt-4">Área do Cliente/Arquiteto</h1>
-            <p className="text-sm sm:text-base text-white/80 mt-2">
-              Faça login para acessar sua conta
-            </p>
-          </div>
+  if (!profileData) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#0077B6] via-[#005F9A] to-[#00477D] flex flex-col items-center justify-center text-white">
+        <div className="text-center">
+          <AlertCircle size={48} className="mx-auto text-white" />
+          <h1 className="mt-4 text-2xl font-bold text-white">Perfil não encontrado</h1>
+          <p className="mt-2 text-white">Não foi possível carregar as informações do seu perfil. Por favor, tente novamente mais tarde.</p>
+          <Button onClick={handleSignOut} className="mt-4 bg-[#0077B6] hover:bg-[#0077B6]/90 text-white">
+            Sair e tentar novamente
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
-          {/* Message display */}
-          {message && (
-            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg flex items-center gap-2 text-white">
-              <AlertCircle size={16} />
-              <span className="text-sm">{message}</span>
-            </div>
-          )}
+  return (
+    <div className="relative min-h-screen p-4 md:p-8 flex flex-col items-center space-y-8">
+      {/* Background with gradient and backdrop blur */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-br from-[#0077B6] via-[#005F9A] to-[#00477D]" />
 
-          {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
-            {/* Email Field */}
-            <div className="relative">
-              <label htmlFor="email" className="block text-sm font-medium text-white mb-2">
-                E-mail
-              </label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60 z-10" size={18} />
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className="w-full pl-10 sm:pl-12 pr-4 py-2.5 sm:py-3 bg-[var(--primary-blue-dark)] border border-[var(--primary-blue-dark)] rounded-xl text-white placeholder-[#396496] focus:outline-none focus:ring-2 focus:ring-[#4c93e3] focus:border-[#4c93e3] transition-all duration-300 text-sm sm:text-base"
-                  placeholder="Digite seu e-mail"
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
+      {/* Logo Centralizada no Topo */}
+      <div className="relative z-10 w-full max-w-4xl flex justify-center py-4">
+        <Image src="/logo.png" alt="Logo da Empresa" width={150} height={50} className="object-contain" />
+      </div>
 
-            {/* Password Field */}
-            <div className="relative">
-              <label htmlFor="password" className="block text-sm font-medium text-white mb-2">
-                Senha
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/60 z-10" size={18} />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  id="password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-2.5 sm:py-3 bg-[var(--primary-blue-dark)] border border-[var(--primary-blue-dark)] rounded-xl text-white placeholder-[#396496] focus:outline-none focus:ring-2 focus:ring-[#4c93e3] focus:border-[#4c93e3] transition-all duration-300 text-sm sm:text-base"
-                  placeholder="Digite sua senha"
-                  required
-                  disabled={isLoading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors duration-300 z-10"
-                  disabled={isLoading}
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
+      {/* Main Content */}
+      <div className="relative z-10 w-full max-w-4xl space-y-6">
+        {/* Header */}
+        <div className="w-full flex justify-between items-center mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-white">
+              <User className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-white">{profileData?.nome || "Usuário"}</h1>
+              <p className="text-sm text-white/80">
+                {userType === "cliente" ? "Cliente" : "Arquiteto"}
+              </p>
+            </div>
+            </div>
+            <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={() => setSettingsOpen(true)}>
+              <Settings className="w-5 h-5" />
+            </Button>
+            <Button variant="ghost" size="icon" className="text-white hover:bg-white/10" onClick={handleSignOut}>
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
+        </div>
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-gradient-to-r from-[var(--secondary-blue)] to-[var(--primary-blue-medium)] text-white font-bold py-2.5 sm:py-3 px-6 rounded-xl transition-all duration-300 hover:scale-105 hover:shadow-2xl hover:-translate-y-1 shimmer-effect relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:translate-y-0 text-sm sm:text-base"
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <Loader2 className="animate-spin" size={18} />
-                  Entrando...
-                </div>
-              ) : (
-                "Entrar"
-              )}
-            </button>
-          </form>
-        </div>
+        {/* Profile Card */}
+        <Card className="bg-white border-[#0077B6]/20">
+          <CardHeader>
+            <CardTitle className="text-[#0077B6] flex items-center gap-2">
+              <User className="text-[#0077B6]" /> Meu Perfil
+            </CardTitle>
+            <CardDescription className="text-gray-600">
+              Gerencie suas informações e acompanhe seus projetos.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2 text-[#0077B6]">
+              <div className="flex items-center gap-3">
+                <User className="w-5 h-5 text-[#0077B6]" />
+                <span>{profileData?.nome || "Nome não disponível"}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Mail className="w-5 h-5 text-[#0077B6]" />
+                <span>{profileData?.email || user?.email}</span>
+              </div>
+              {profileData?.cidade && (
+                <div className="flex items-center gap-3">
+                  <MapPin className="w-5 h-5 text-[#0077B6]" />
+                  <span>{profileData?.cidade} - {profileData?.estado}</span>
+                </div>
+              )}
+            </div>
 
-        {/* Copyright */}
-        <div className="text-center mt-6 sm:mt-8">
-          <p className="text-white/60 text-xs sm:text-sm">© 2025 Design Vidraçaria. Todos os direitos reservados.</p>
-        </div>
-      </div>
-    </div>
-  )
+            {userType === 'cliente' && (
+              <div className="flex justify-center pt-4">
+                <Button onClick={() => setSolicitacaoAndamentoOpen(true)} className="bg-[#0077B6] hover:bg-[#0077B6]/90 text-white font-semibold">
+                  SOLICITAR ANDAMENTO DE OBRA
+                </Button>
+              </div>
+            )}
+            
+            {userType === 'arquiteto' && (
+              <div className="space-y-4 pt-4">
+                <h3 className="flex items-center gap-2 font-medium text-[#0077B6]">
+                  <Award className="w-5 h-5 text-[#0077B6]" />
+                  Progresso do Desconto
+                </h3>
+                <div className="flex items-center gap-4">
+                  <Progress value={calculateDiscountProgress()} className="flex-1 h-2 bg-gray-200 [&>div]:bg-[#0077B6]" />
+                  <span className="text-sm text-[#0077B6]">{profileData?.desconto_atual || 0}% de desconto</span>
+                </div>
+              </div>
+            )}
+
+          </CardContent>
+        </Card>
+
+        {/* Tabs */}
+        <Tabs defaultValue="obras" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 bg-white/20 border-white/30">
+            <TabsTrigger value="obras" className="text-white data-[state=active]:bg-white data-[state=active]:text-[#0077B6] data-[state=active]:shadow-sm">
+              <Wrench className="w-4 h-4 mr-2" />
+              Todas as Obras
+            </TabsTrigger>
+            {userType === 'cliente' && (
+              <TabsTrigger value="solicitacoes" className="text-white data-[state=active]:bg-white data-[state=active]:text-[#0077B6] data-[state=active]:shadow-sm">
+                <MessageCircle className="w-4 h-4 mr-2" />
+                Solicitações
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          {/* Obras Tab Content */}
+          <TabsContent value="obras" className="p-4 space-y-4">
+            <div className="grid gap-4">
+              {loadingObras ? (
+                <div className="text-center text-white">Carregando obras...</div>
+              ) : obras.length > 0 ? (
+                obras.map((obra) => (
+                  <Card key={obra.id} className="bg-white border-[#0077B6]/20">
+                    <CardHeader>
+                      <CardTitle className="flex justify-between items-center text-lg text-[#0077B6]">
+                        <span>{obra.titulo}</span>
+                        <Badge className={`${getStatusColor(obra.status)} text-white`}>{getStatusText(obra.status)}</Badge>
+                      </CardTitle>
+                      <CardDescription className="text-gray-600 text-sm">{obra.data_inicio} - {obra.data_previsao || "Não informada"}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm text-[#0077B6]">
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 text-[#0077B6]" />
+                        <span className="font-semibold">{obra.cliente}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-[#0077B6]" />
+                        <span className="font-semibold">{obra.endereco}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              ) : (
+                <div className="text-center text-white">Nenhuma obra encontrada.</div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Solicitações Tab Content (only for clients) */}
+          {userType === 'cliente' && (
+            <TabsContent value="solicitacoes" className="p-4 space-y-4">
+              <Card className="bg-white border-[#0077B6]/20">
+                <CardHeader>
+                  <CardTitle className="text-[#0077B6]">Minhas Solicitações</CardTitle>
+                  <CardDescription className="text-gray-600">
+                    Acompanhe o status das suas solicitações de manutenção.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingSolicitacoes ? (
+                    <div className="text-center text-white">Carregando solicitações...</div>
+                  ) : solicitacoes.length === 0 ? (
+                    <div className="text-center text-white">Nenhuma solicitação encontrada.</div>
+                  ) : (
+                    <div className="grid gap-4">
+                      {solicitacoes.map((solicitacao) => (
+                        <Card key={solicitacao.id} className="bg-white border-[#0077B6]/20">
+                          <CardContent className="p-4 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="font-semibold text-[#0077B6]">{solicitacao.tipo_servico}</span>
+                              <Badge className={`${getManutencaoStatusColor(solicitacao.status)} text-white`}>
+                                {getStatusText(solicitacao.status)}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-[#0077B6]">{solicitacao.descricao_problema}</p>
+                            <div className="flex justify-between items-center text-xs text-[#0077B6]">
+                              <span>Data: {new Date(solicitacao.created_at).toLocaleDateString()}</span>
+                              <span className={`px-2 py-1 rounded-full text-xs capitalize font-medium ${getUrgenciaColor(solicitacao.urgencia)}`}>{solicitacao.urgencia}</span>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+
+      {/* Chat Component */}
+      <Chat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+
+      {/* Settings Modal */}
+      {profileData && <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} user={user} userType={userType} profileData={profileData} />}
+
+      {/* Solicitação Andamento Modal */}
+      {profileData && <SolicitacaoModal isOpen={solicitacaoAndamentoOpen} onClose={() => setSolicitacaoAndamentoOpen(false)} userProfile={profileData} userType={userType} />}
+    </div>
+  )
 }
